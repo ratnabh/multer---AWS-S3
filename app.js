@@ -1,73 +1,45 @@
-const express = require('express');
-const multer = require('multer');
-const ejs = require('ejs');
-const path = require('path');
+require("dotenv/config");
 
-// Set The Storage Engine
-const storage = multer.diskStorage({
-  destination: './public/uploads/',
-  filename: function(req, file, cb){
-    cb(null,file.fieldname + '-' + Date.now() + path.extname(file.originalname));
-  }
+const express = require("express");
+const multer = require("multer");
+const AWS = require("aws-sdk");
+const { v4: uuidv4 } = require("uuid");
+
+const app = express();
+const port = 3000;
+
+const s3 = new AWS.S3({
+  accessKeyId: process.env.AWS_ID,
+  secretAccessKey: process.env.AWS_SECRET,
 });
 
-// Init Upload
-const upload = multer({
-  storage: storage,
-  limits:{fileSize: 1000000},
-  fileFilter: function(req, file, cb){
-    checkFileType(file, cb);
-  }
-}).single('myImage');
+const storage = multer.memoryStorage({
+  destination: function (req, file, callback) {
+    callback(null, "");
+  },
+});
 
-// Check File Type
-function checkFileType(file, cb){
-  // Allowed ext
-  const filetypes = /jpeg|jpg|png|gif/;
-  // Check ext
-  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-  // Check mime
-  const mimetype = filetypes.test(file.mimetype);
+const upload = multer({ storage }).single("image");
 
-  if(mimetype && extname){
-    return cb(null,true);
-  } else {
-    cb('Error: Images Only!');
-  }
-}
+app.post("/upload", upload, (req, res) => {
+  let myFile = req.file.originalname.split(".");
+  const fileType = myFile[myFile.length - 1];
 
-// Init app
-const app = express();
+  const params = {
+    Bucket: process.env.AWS_BUCKET_NAME,
+    Key: `${uuidv4()}.${fileType}`,
+    Body: req.file.buffer,
+  };
 
-// EJS
-app.set('view engine', 'ejs');
-
-// Public Folder
-app.use(express.static('./public'));
-
-app.get('/', (req, res) => res.render('index'));
-
-app.post('/upload', (req, res) => {
-  upload(req, res, (err) => {
-    if(err){
-      res.render('index', {
-        msg: err
-      });
-    } else {
-      if(req.file == undefined){
-        res.render('index', {
-          msg: 'Error: No File Selected!'
-        });
-      } else {
-        res.render('index', {
-          msg: 'File Uploaded!',
-          file: `uploads/${req.file.filename}`
-        });
-      }
+  s3.upload(params, (error, data) => {
+    if (error) {
+      res.status(500).send(error);
     }
+
+    res.status(200).send(data);
   });
 });
 
-const port = 3000;
-
-app.listen(port, () => console.log(`Server started on port ${port}`));
+app.listen(port, () => {
+  console.log(`Server is up at ${port}`);
+});
